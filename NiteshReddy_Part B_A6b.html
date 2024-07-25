@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta http-equiv="content-type" content="text/html; charset=utf-8"/>
+	<title></title>
+	<meta name="generator" content="LibreOffice 7.6.7.2 (Linux)"/>
+	<meta name="created" content="00:00:00"/>
+	<meta name="changed" content="00:00:00"/>
+	<style type="text/css">
+		@page { size: 8.5in 11in; margin: 0.79in }
+		p { line-height: 115%; margin-bottom: 0.1in; background: transparent }
+		pre { background: transparent }
+		pre.western { font-family: "Liberation Mono", monospace; font-size: 10pt }
+		pre.cjk { font-family: "Noto Sans Mono CJK SC", monospace; font-size: 10pt }
+		pre.ctl { font-family: "Liberation Mono", monospace; font-size: 10pt }
+	</style>
+</head>
+<body lang="en-US" link="#000080" vlink="#800000" dir="ltr"><pre class="western"># Set working directory and load necessary libraries
+setwd('D:\\Course\\Boot Camp\\SCMA 632\\Assignments\\A6b')
+getwd()
+
+# Load necessary libraries
+library(readxl)
+library(dplyr)
+library(janitor)
+library(urca)
+library(vars)
+
+# Load the dataset
+df &lt;- read_excel('pinksheet.xlsx', sheet = &quot;Monthly Prices&quot;, skip = 6)
+
+# Rename the first column to &quot;Date&quot;
+colnames(df)[1] &lt;- 'Date'
+# Convert the Date column to Date format
+df$Date &lt;- as.Date(paste0(df$Date, &quot;01&quot;), format = &quot;%YM%m%d&quot;)
+str(df)
+
+# Select specific columns (Date and selected commodities)
+commodity &lt;- df[,c(1,3,25,70,72,61,31)] %&gt;%
+  clean_names()
+
+str(commodity)
+
+# Remove the Date column for analysis
+commodity_data &lt;- dplyr::select(commodity, -date)
+
+# Column names to test (if you want to specify particular columns)
+columns_to_test &lt;- names(commodity_data)
+
+# Initialize counters and lists for stationary and non-stationary columns
+non_stationary_count &lt;- 0
+stationary_columns &lt;- list()
+non_stationary_columns &lt;- list()
+
+# Loop through each column and perform the ADF test
+for (col in columns_to_test) {
+  adf_result &lt;- ur.df(commodity_data[[col]], type = &quot;none&quot;, selectlags = &quot;AIC&quot;)
+  p_value &lt;- adf_result@testreg$coefficients[2, 4]  # Extract p-value for the test
+  cat(&quot;\nADF test result for column:&quot;, col, &quot;\n&quot;)
+  print(summary(adf_result))
+  
+  # Check if the p-value is greater than 0.05 (commonly used threshold)
+  if (p_value &gt; 0.05) {
+    non_stationary_count &lt;- non_stationary_count + 1
+    non_stationary_columns &lt;- c(non_stationary_columns, col)
+  } else {
+    stationary_columns &lt;- c(stationary_columns, col)
+  }
+}
+
+# Print the number of non-stationary columns and the lists of stationary and non-stationary columns
+cat(&quot;\nNumber of non-stationary columns:&quot;, non_stationary_count, &quot;\n&quot;)
+cat(&quot;Non-stationary columns:&quot;, non_stationary_columns, &quot;\n&quot;)
+cat(&quot;Stationary columns:&quot;)
+stationary_columns
+
+# Co-Integration Test (Johansen's Test)
+# Determining the number of lags to use (you can use information criteria like AIC, BIC)
+lags &lt;- VARselect(commodity_data, lag.max = 10, type = &quot;const&quot;)
+lag_length &lt;- lags$selection[1] # Choosing the lag with the lowest AIC
+
+vecm_model &lt;- ca.jo(commodity_data, ecdet = 'const', type = 'eigen', K = lag_length, spec = 'transitory')
+
+# Summary of the Co-Integration Test
+summary(vecm_model)
+
+# Determine the number of co-integrating relationships (r) based on the test
+# Here, we assume r = 1 if there's at least one significant eigenvalue
+r &lt;- 3 # Replace with the actual number from the test results
+
+if (r &gt; 0) {
+  # If co-integration exists, estimate the VECM model
+  vecm &lt;- cajorls(vecm_model, r = r)  # r is the number of co-integration vectors
+  
+  # Summary of the VECM model
+  summary(vecm)
+  
+  # Extracting the coefficients from the VECM model
+  vecm_coefs &lt;- vecm$rlm$coefficients
+  print(vecm_coefs)
+  
+  # Creating a VAR model for prediction using the VECM
+  vecm_pred &lt;- vec2var(vecm_model, r = r)
+  
+  # Forecasting using the VECM model
+  # Forecasting 12 steps ahead
+  forecast &lt;- predict(vecm_pred, n.ahead = 24)
+  
+  # Plotting the forecast
+  par(mar = c(4, 4, 2, 2))  # Adjust margins: c(bottom, left, top, right)
+  plot(forecast)
+  
+} else {
+  # If no co-integration exists, proceed with Unrestricted VAR Analysis
+  var_model &lt;- VAR(commodity_data, p = lag_length, type = &quot;const&quot;)
+  
+  # Summary of the VAR model
+  summary(var_model)
+  
+  # Granger causality test
+  causality_results &lt;- causality(var_model)
+  print(causality_results)
+  
+  # Forecasting using the VAR model
+  forecast &lt;- predict(var_model, n.ahead = 24)
+  
+  # Plotting the forecast
+  par(mar = c(4, 4, 2, 2))  # Adjust margins: c(bottom, left, top, right)
+  plot(forecast)
+}
+
+forecast
+</pre>
+</body>
+</html>
